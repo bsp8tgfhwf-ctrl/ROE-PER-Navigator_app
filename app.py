@@ -36,17 +36,6 @@ def chunk_list(lst, chunk_size):
     for i in range(0, len(lst), chunk_size):
         yield lst[i:i + chunk_size]
 
-# Streamlit UI
-st.set_page_config(page_title="初期購入モデル（CSV対応）", layout="wide")
-st.title("📈 初期購入モデル：生成AI＋半導体株（CSV形式で保存）")
-
-initial_yen = st.number_input("初期投資額（円）", value=300000)
-roe_weight = st.slider("ROEの重み", 0.0, 1.0, 0.6)
-
-usd_to_jpy = get_usd_to_jpy()
-st.write(f"📈 現在の為替レート（USD→JPY）: {usd_to_jpy:.2f} 円")
-initial_usd = initial_yen / usd_to_jpy
-
 # 銘柄情報
 tickers_info = {
     "NVDA": "GPU・AI半導体の設計・開発", "AMD": "CPU・GPUの設計とデータセンター向け製品",
@@ -62,10 +51,16 @@ tickers_info = {
 }
 tickers = list(tickers_info.keys())
 
-# データ取得（分割）
-roe_data = {}
-per_data = {}
-prices = {}
+# UI構成
+st.set_page_config(page_title="一体型資産管理アプリ", layout="wide")
+st.title("📊 一体型資産管理アプリ")
+mode = st.radio("モードを選択してください", ["初期購入", "月次リバランス"])
+roe_weight = st.slider("ROEの重み", 0.0, 1.0, 0.6)
+usd_to_jpy = get_usd_to_jpy()
+st.write(f"📈 現在の為替レート（USD→JPY）: {usd_to_jpy:.2f} 円")
+
+# データ取得
+roe_data, per_data, prices = {}, {}, {}
 progress_bar = st.progress(0)
 chunk_size = 5
 total_chunks = len(list(chunk_list(tickers, chunk_size)))
@@ -91,51 +86,49 @@ for group in chunk_list(tickers, chunk_size):
     progress_bar.progress(chunk_index / total_chunks)
     time.sleep(10)
 
-# スコア計算
 df = calculate_scores(roe_data, per_data, roe_weight)
 df["Price"] = df["Ticker"].map(prices)
 df["Business"] = df["Ticker"].map(tickers_info)
 df = df.dropna(subset=["Price"])
 df_sorted = df.sort_values(by="Score", ascending=False).copy()
 
-# 必ず5銘柄購入
-df_top5 = df_sorted.head(5).copy()
-allocated_usd = initial_usd / 5
-df_top5["Shares"] = (allocated_usd / df_top5["Price"]).astype(int)
-df_top5["Used_USD"] = df_top5["Shares"] * df_top5["Price"]
-df_top5["Used_JPY"] = df_top5["Used_USD"] * usd_to_jpy
-total_invested_yen = df_top5["Used_JPY"].sum()
+# 初期購入モード
+if mode == "初期購入":
+    st.header("🛒 初期購入モード")
+    initial_yen = st.number_input("初期投資額（円）", value=300000)
+    initial_usd = initial_yen / usd_to_jpy
+    df_top5 = df_sorted.head(5).copy()
+    allocated_usd = initial_usd / 5
+    df_top5["Shares"] = (allocated_usd / df_top5["Price"]).astype(int)
+    df_top5["Used_USD"] = df_top5["Shares"] * df_top5["Price"]
+    df_top5["Used_JPY"] = df_top5["Used_USD"] * usd_to_jpy
+    df_top5["Reason"] = df_top5.apply(lambda row: f"{row['Ticker']}は{row['Business']}を手がけており、ROE {row['ROE']:.1f}%、PER {row['PER']:.1f}倍と財務指標も優秀。スコア上位に位置するため、初期購入対象に選定しました。", axis=1)
 
-# 選定理由生成
-df_top5["Reason"] = df_top5.apply(lambda row: f"{row['Ticker']}は{row['Business']}を手がけており、ROE {row['ROE']:.1f}%、PER {row['PER']:.1f}倍と財務指標も優秀。スコア上位に位置するため、初期購入対象に選定しました。", axis=1)
+    st.subheader("📊 スコアランキング（全銘柄）")
+    st.dataframe(df_sorted[["Ticker", "Business", "ROE", "PER", "Score"]])
 
-# 表示
-st.subheader("📊 スコアランキング（全銘柄）")
-st.dataframe(df_sorted[["Ticker", "Business", "ROE", "PER", "Score"]])
+    st.subheader("💰 初期購入対象（必ず5銘柄）")
+    st.dataframe(df_top5[["Ticker", "Business", "Shares", "Price", "Used_USD", "Used_JPY", "Reason"]])
+    st.write(f"🧾 合計投資額（円）: {df_top5['Used_JPY'].sum():,.0f} 円")
 
-st.subheader("💰 初期購入対象（必ず5銘柄）")
-st.dataframe(df_top5[["Ticker", "Business", "Shares", "Price", "Used_USD", "Used_JPY", "Reason"]])
-st.write(f"🧾 合計投資額（円）: {total_invested_yen:,.0f} 円")
-if total_invested_yen > initial_yen:
-    st.warning(f"⚠️ 合計投資額が予算を {total_invested_yen - initial_yen:,.0f} 円オーバーしています")
+    st.subheader("📥 portfolio.csv をダウンロード")
+    df_top5["PurchasePriceUSD"] = df_top5["Price"]
+    df_top5["PurchaseDate"] = pd.Timestamp.today().strftime("%Y-%m-%d")
+    df_top5["ROE"] = df_top5["Ticker"].map(roe_data)
+    df_top5["PER"] = df_top5["Ticker"].map(per_data)
+    df_top5["Score"] = df_top5["Ticker"].map(df.set_index("Ticker")["Score"])
+    df_top5["PurchaseRate"] = usd_to_jpy
+    portfolio_df = df_top5[["Ticker", "Shares", "PurchasePriceUSD", "PurchaseDate", "ROE", "PER", "Score", "PurchaseRate"]]
+    csv = portfolio_df.to_csv(index=False).encode("utf-8")
+    st.download_button("📄 portfolio.csv をダウンロード", data=csv, file_name="portfolio.csv", mime="text/csv")
 
-# CSV保存（月次モデル互換）
-st.subheader("📥 月次モデル用CSV保存")
-df_top5["PurchasePriceUSD"] = df_top5["Price"]
-df_top5["PurchaseDate"] = pd.Timestamp.today().strftime("%Y-%m-%d")
-df_top5["ROE"] = df_top5["Ticker"].map(roe_data)
-df_top5["PER"] = df_top5["Ticker"].map(per_data)
-df_top5["Score"] = df_top5["Ticker"].map(df.set_index("Ticker")["Score"])
-df_top5["PurchaseRate"] = usd_to_jpy
-portfolio_df = df_top5[["Ticker", "Shares", "PurchasePriceUSD", "PurchaseDate", "ROE", "PER", "Score", "PurchaseRate"]]
-csv = portfolio_df.to_csv(index=False).encode("utf-8")
-st.download_button("📄 portfolio.csv をダウンロード", data=csv, file_name="portfolio.csv", mime="text/csv")
-
-# グラフ
-st.subheader("📊 資金配分グラフ（円換算）")
-labels = df_top5["Ticker"]
-sizes = df_top5["Used_JPY"]
-fig, ax = plt.subplots()
-ax.pie(sizes, labels=labels, autopct="%1.1f%%", startangle=90)
-ax.axis("equal")
-st.pyplot(fig)
+# 月次リバランスモード
+elif mode == "月次リバランス":
+    st.header("🔄 月次リバランスモード")
+    uploaded_file = st.file_uploader("📤 portfolio.csv をアップロード", type="csv")
+    if uploaded_file is not None:
+        portfolio_df = pd.read_csv(uploaded_file)
+        owned_tickers = portfolio_df["Ticker"].tolist()
+        portfolio_df["CurrentPriceUSD"] = portfolio_df["Ticker"].map(prices)
+        portfolio_df["CurrentRate"] = usd_to_jpy
+        portfolio
