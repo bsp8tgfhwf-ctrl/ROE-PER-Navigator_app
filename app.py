@@ -16,16 +16,6 @@ def get_usd_to_jpy():
     except:
         return 152.80  # fallback
 
-# ROE・PER取得
-def get_roe_per_yahoo(ticker):
-    stock = yf.Ticker(ticker)
-    info = stock.info
-    roe = info.get("returnOnEquity")
-    per = info.get("trailingPE")
-    if roe is not None:
-        roe = roe * 100
-    return roe, per
-
 # スコア計算
 def calculate_scores(roe_dict, per_dict, roe_weight=0.6):
     per_weight = 1.0 - roe_weight
@@ -40,6 +30,11 @@ def calculate_scores(roe_dict, per_dict, roe_weight=0.6):
     df["Weight"] = df["Score"] / df["Score"].sum()
     df = df.dropna(subset=["Score", "Weight"])
     return df
+
+# 銘柄リスト分割
+def chunk_list(lst, chunk_size):
+    for i in range(0, len(lst), chunk_size):
+        yield lst[i:i + chunk_size]
 
 # Streamlit UI
 st.set_page_config(page_title="初期購入モデル", layout="wide")
@@ -78,23 +73,34 @@ tickers_info = {
 
 tickers = list(tickers_info.keys())
 
-# データ取得（1秒待機）
+# データ取得（分割＋待機）
 roe_data = {}
 per_data = {}
 prices = {}
 progress_bar = st.progress(0)
+chunk_size = 5
+total_chunks = len(list(chunk_list(tickers, chunk_size)))
+chunk_index = 0
 
-for i, ticker in enumerate(tickers):
-    stock = yf.Ticker(ticker)
-    time.sleep(1)
-    try:
-        prices[ticker] = stock.history(period="1d")["Close"].iloc[-1]
-    except:
-        prices[ticker] = None
-    roe, per = get_roe_per_yahoo(ticker)
-    roe_data[ticker] = roe if roe is not None else 0
-    per_data[ticker] = per if per is not None else 100
-    progress_bar.progress((i + 1) / len(tickers))
+for group in chunk_list(tickers, chunk_size):
+    for ticker in group:
+        stock = yf.Ticker(ticker)
+        try:
+            prices[ticker] = stock.history(period="1d")["Close"].iloc[-1]
+        except:
+            prices[ticker] = None
+        try:
+            info = stock.info
+            roe = info.get("returnOnEquity")
+            per = info.get("trailingPE")
+            roe_data[ticker] = roe * 100 if roe else 0
+            per_data[ticker] = per if per else 100
+        except:
+            roe_data[ticker] = 0
+            per_data[ticker] = 100
+    chunk_index += 1
+    progress_bar.progress(chunk_index / total_chunks)
+    time.sleep(10)
 
 # スコア計算
 df = calculate_scores(roe_data, per_data, roe_weight)
