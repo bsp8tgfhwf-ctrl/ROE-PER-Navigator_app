@@ -4,9 +4,6 @@ import yfinance as yf
 import matplotlib.pyplot as plt
 from sklearn.preprocessing import MinMaxScaler
 
-# -----------------------------
-# 関数①：Yahoo FinanceからROE・PER取得
-# -----------------------------
 def get_roe_per_yahoo(ticker):
     stock = yf.Ticker(ticker)
     info = stock.info
@@ -16,9 +13,6 @@ def get_roe_per_yahoo(ticker):
         roe = roe * 100
     return roe, per
 
-# -----------------------------
-# 関数②：スコアリング
-# -----------------------------
 def calculate_scores(roe_dict, per_dict, roe_weight=0.6):
     per_weight = 1.0 - roe_weight
     df = pd.DataFrame({
@@ -33,20 +27,14 @@ def calculate_scores(roe_dict, per_dict, roe_weight=0.6):
     df = df.dropna(subset=["Score", "Weight"])
     return df
 
-# -----------------------------
-# Streamlit UI
-# -----------------------------
 st.set_page_config(page_title="初期購入モデル", layout="wide")
-st.title("📈 初期購入モデル：生成AI＋半導体株（上位5銘柄）")
+st.title("📈 初期購入モデル：生成AI＋半導体株（最大5銘柄）")
 
 initial_yen = st.number_input("初期投資額（円）", value=300000)
 roe_weight = st.slider("ROEの重み", 0.0, 1.0, 0.6)
 usd_to_jpy = 152.80
 initial_usd = initial_yen / usd_to_jpy
 
-# -----------------------------
-# 銘柄リストと事業内容
-# -----------------------------
 tickers_info = {
     "NVDA": "GPU・AI半導体の設計・開発",
     "AMD": "CPU・GPUの設計とデータセンター向け製品",
@@ -72,9 +60,6 @@ tickers_info = {
 
 tickers = list(tickers_info.keys())
 
-# -----------------------------
-# データ取得
-# -----------------------------
 roe_data = {}
 per_data = {}
 prices = {}
@@ -86,43 +71,52 @@ for ticker in tickers:
     roe_data[ticker] = roe if roe is not None else 0
     per_data[ticker] = per if per is not None else 100
 
-# -----------------------------
-# スコア計算と株数計算
-# -----------------------------
 df = calculate_scores(roe_data, per_data, roe_weight)
 df["Price"] = df["Ticker"].map(prices)
 df["Business"] = df["Ticker"].map(tickers_info)
-df["Allocated_USD"] = df["Weight"] * initial_usd
+df = df.dropna(subset=["Price"])
 
-df_valid = df.dropna(subset=["Allocated_USD", "Price"]).copy()
-df_valid["Shares"] = (df_valid["Allocated_USD"] / df_valid["Price"]).astype(int)
-df_valid["Used_USD"] = df_valid["Shares"] * df_valid["Price"]
-df_valid["Used_JPY"] = df_valid["Used_USD"] * usd_to_jpy
-df_valid["Rank"] = df_valid["Score"].rank(ascending=False).astype(int)
+df_sorted = df.sort_values(by="Score", ascending=False).copy()
 
-# -----------------------------
-# 上位5銘柄を購入対象に限定
-# -----------------------------
-df_top5 = df_valid.sort_values(by="Score", ascending=False).head(5)
-df_top5 = df_top5[df_top5["Shares"] >= 1]
+# 優先順位に基づく購入ロジック
+selected = []
+remaining_usd = initial_usd
 
-# -----------------------------
-# 表示
-# -----------------------------
+for _, row in df_sorted.iterrows():
+    if len(selected) >= 5:
+        break
+    max_shares = int(remaining_usd // row["Price"])
+    if max_shares >= 1:
+        used_usd = max_shares * row["Price"]
+        remaining_usd -= used_usd
+        selected.append({
+            "Ticker": row["Ticker"],
+            "Business": row["Business"],
+            "Price": row["Price"],
+            "Shares": max_shares,
+            "Used_USD": used_usd,
+            "Used_JPY": used_usd * usd_to_jpy,
+            "Score": row["Score"],
+            "ROE": row["ROE"],
+            "PER": row["PER"]
+        })
+
+df_top = pd.DataFrame(selected)
+
 st.subheader("📊 スコアランキング（全銘柄）")
-st.dataframe(df_valid.sort_values(by="Score", ascending=False)[["Ticker", "Business", "ROE", "PER", "Score", "Shares"]])
+st.dataframe(df_sorted[["Ticker", "Business", "ROE", "PER", "Score"]])
 
-st.subheader("💰 初期購入対象（スコア上位5銘柄）")
-st.dataframe(df_top5[["Ticker", "Business", "Shares", "Price", "Used_USD", "Used_JPY"]])
-st.write(f"🧾 合計投資額（円）: {df_top5['Used_JPY'].sum():,.0f} 円")
+st.subheader("💰 初期購入対象（最大5銘柄）")
+st.dataframe(df_top[["Ticker", "Business", "Shares", "Price", "Used_USD", "Used_JPY"]])
+st.write(f"🧾 合計投資額（円）: {df_top['Used_JPY'].sum():,.0f} 円")
 
 st.subheader("📥 初期購入結果の保存")
-csv = df_top5.to_csv(index=False).encode("utf-8")
+csv = df_top.to_csv(index=False).encode("utf-8")
 st.download_button("📄 CSVでダウンロード", data=csv, file_name="initial_purchase_top5.csv", mime="text/csv")
 
 st.subheader("📊 資金配分グラフ（円換算）")
-labels = df_top5["Ticker"]
-sizes = df_top5["Used_JPY"]
+labels = df_top["Ticker"]
+sizes = df_top["Used_JPY"]
 fig, ax = plt.subplots()
 ax.pie(sizes, labels=labels, autopct="%1.1f%%", startangle=90)
 ax.axis("equal")
