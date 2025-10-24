@@ -1,4 +1,3 @@
-# app.py
 import streamlit as st
 import pandas as pd
 import yfinance as yf
@@ -96,23 +95,18 @@ df_sorted = df.sort_values(by="Score", ascending=False).copy()
 # 初期購入モード
 if mode == "初期購入":
     st.header("🛒 初期購入モード")
-    initial_yen = st.number_input("初期投資額（円）", value=300000)
+    initial_yen = st.number_input("💰 初期投資額（円）を入力してください", value=300000, step=10000)
     initial_usd = initial_yen / usd_to_jpy
     df_top5 = df_sorted.head(5).copy()
     allocated_usd = initial_usd / 5
     df_top5["Shares"] = (allocated_usd / df_top5["Price"]).astype(int)
     df_top5["Used_USD"] = df_top5["Shares"] * df_top5["Price"]
     df_top5["Used_JPY"] = df_top5["Used_USD"] * usd_to_jpy
-    df_top5["Reason"] = df_top5.apply(lambda row: f"{row['Ticker']}は{row['Business']}を手がけており、ROE {row['ROE']:.1f}%、PER {row['PER']:.1f}倍と財務指標も優秀。スコア上位に位置するため、初期購入対象に選定しました。", axis=1)
 
-    st.subheader("📊 スコアランキング（全銘柄）")
-    st.dataframe(df_sorted[["Ticker", "Business", "ROE", "PER", "Score"]])
-
-    st.subheader("💰 初期購入対象（必ず5銘柄）")
-    st.dataframe(df_top5[["Ticker", "Business", "Shares", "Price", "Used_USD", "Used_JPY", "Reason"]])
+    st.subheader("📊 初期購入対象（上位5銘柄）")
+    st.dataframe(df_top5[["Ticker", "Shares", "Price", "Used_USD", "Used_JPY"]])
     st.write(f"🧾 合計投資額（円）: {df_top5['Used_JPY'].sum():,.0f} 円")
 
-    st.subheader("📥 portfolio.csv をダウンロード")
     df_top5["PurchasePriceUSD"] = df_top5["Price"]
     df_top5["PurchaseDate"] = pd.Timestamp.today().strftime("%Y-%m-%d")
     df_top5["ROE"] = df_top5["Ticker"].map(roe_data)
@@ -131,4 +125,25 @@ elif mode == "月次リバランス":
         portfolio_df = pd.read_csv(uploaded_file)
         owned_tickers = portfolio_df["Ticker"].tolist()
         additional_yen = st.number_input("📥 今月の追加投資額（円）", value=0)
-        additional_usd = additional_y
+        additional_usd = additional_yen / usd_to_jpy
+
+        portfolio_df["CurrentPriceUSD"] = portfolio_df["Ticker"].map(prices)
+        portfolio_df["CurrentRate"] = usd_to_jpy
+        portfolio_df["ProfitJPY"] = (
+            (portfolio_df["CurrentPriceUSD"] * portfolio_df["CurrentRate"]) -
+            (portfolio_df["PurchasePriceUSD"] * portfolio_df["PurchaseRate"])
+        ) * portfolio_df["Shares"]
+
+        st.subheader("💰 円ベースの損益（含み益・損）")
+        st.dataframe(portfolio_df[["Ticker", "Shares", "PurchasePriceUSD", "CurrentPriceUSD", "PurchaseRate", "CurrentRate", "ProfitJPY"]])
+        st.write(f"📈 合計損益（円）: {portfolio_df['ProfitJPY'].sum():,.0f} 円")
+
+        top_candidates = df_sorted.head(5)
+        rebalance_actions = []
+
+        for _, row in top_candidates.iterrows():
+            if row["Ticker"] not in owned_tickers:
+                rebalance_actions.append({"Ticker": row["Ticker"], "Action": "Buy", "Price": row["Price"]})
+        for _, row in portfolio_df.iterrows():
+            if row["Ticker"] not in top_candidates["Ticker"].values:
+                rebalance_actions.append({"
