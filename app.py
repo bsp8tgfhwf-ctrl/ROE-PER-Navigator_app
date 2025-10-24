@@ -1,3 +1,4 @@
+# app.py
 import streamlit as st
 import pandas as pd
 import yfinance as yf
@@ -129,6 +130,5 @@ elif mode == "月次リバランス":
     if uploaded_file is not None:
         portfolio_df = pd.read_csv(uploaded_file)
         owned_tickers = portfolio_df["Ticker"].tolist()
-        portfolio_df["CurrentPriceUSD"] = portfolio_df["Ticker"].map(prices)
-        portfolio_df["CurrentRate"] = usd_to_jpy
-        portfolio
+        additional_yen = st.number_input("📥 今月の追加投資額（円）", value=0)
+        additional_usd = additional_y
