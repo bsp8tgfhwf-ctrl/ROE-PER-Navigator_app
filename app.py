@@ -126,7 +126,8 @@ df_top5["PurchaseDate"] = pd.Timestamp.today().strftime("%Y-%m-%d")
 df_top5["ROE"] = df_top5["Ticker"].map(roe_data)
 df_top5["PER"] = df_top5["Ticker"].map(per_data)
 df_top5["Score"] = df_top5["Ticker"].map(df.set_index("Ticker")["Score"])
-portfolio_df = df_top5[["Ticker", "Shares", "PurchasePriceUSD", "PurchaseDate", "ROE", "PER", "Score"]]
+df_top5["PurchaseRate"] = usd_to_jpy
+portfolio_df = df_top5[["Ticker", "Shares", "PurchasePriceUSD", "PurchaseDate", "ROE", "PER", "Score", "PurchaseRate"]]
 csv = portfolio_df.to_csv(index=False).encode("utf-8")
 st.download_button("📄 portfolio.csv をダウンロード", data=csv, file_name="portfolio.csv", mime="text/csv")
 
