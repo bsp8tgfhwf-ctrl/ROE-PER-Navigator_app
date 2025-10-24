@@ -3,7 +3,24 @@ import pandas as pd
 import yfinance as yf
 import matplotlib.pyplot as plt
 from sklearn.preprocessing import MinMaxScaler
+import time
+import requests
 
+# -----------------------------
+# 関数①：為替レート取得（USD→JPY）
+# -----------------------------
+def get_usd_to_jpy():
+    url = "https://api.exchangerate.host/latest?base=USD&symbols=JPY"
+    try:
+        response = requests.get(url)
+        data = response.json()
+        return data["rates"]["JPY"]
+    except:
+        return 152.80  # fallback
+
+# -----------------------------
+# 関数②：Yahoo FinanceからROE・PER取得
+# -----------------------------
 def get_roe_per_yahoo(ticker):
     stock = yf.Ticker(ticker)
     info = stock.info
@@ -13,6 +30,9 @@ def get_roe_per_yahoo(ticker):
         roe = roe * 100
     return roe, per
 
+# -----------------------------
+# 関数③：スコアリング
+# -----------------------------
 def calculate_scores(roe_dict, per_dict, roe_weight=0.6):
     per_weight = 1.0 - roe_weight
     df = pd.DataFrame({
@@ -27,14 +47,22 @@ def calculate_scores(roe_dict, per_dict, roe_weight=0.6):
     df = df.dropna(subset=["Score", "Weight"])
     return df
 
+# -----------------------------
+# Streamlit UI
+# -----------------------------
 st.set_page_config(page_title="初期購入モデル", layout="wide")
 st.title("📈 初期購入モデル：生成AI＋半導体株（最大5銘柄）")
 
 initial_yen = st.number_input("初期投資額（円）", value=300000)
 roe_weight = st.slider("ROEの重み", 0.0, 1.0, 0.6)
-usd_to_jpy = 152.80
+
+usd_to_jpy = get_usd_to_jpy()
+st.write(f"📈 現在の為替レート（USD→JPY）: {usd_to_jpy:.2f} 円")
 initial_usd = initial_yen / usd_to_jpy
 
+# -----------------------------
+# 銘柄リストと事業内容
+# -----------------------------
 tickers_info = {
     "NVDA": "GPU・AI半導体の設計・開発",
     "AMD": "CPU・GPUの設計とデータセンター向け製品",
@@ -60,17 +88,29 @@ tickers_info = {
 
 tickers = list(tickers_info.keys())
 
+# -----------------------------
+# データ取得（1秒待機でレート制限回避）
+# -----------------------------
 roe_data = {}
 per_data = {}
 prices = {}
+progress_bar = st.progress(0)
 
-for ticker in tickers:
+for i, ticker in enumerate(tickers):
     stock = yf.Ticker(ticker)
-    prices[ticker] = stock.info.get("currentPrice")
+    time.sleep(1)
+    try:
+        prices[ticker] = stock.history(period="1d")["Close"].iloc[-1]
+    except:
+        prices[ticker] = None
     roe, per = get_roe_per_yahoo(ticker)
     roe_data[ticker] = roe if roe is not None else 0
     per_data[ticker] = per if per is not None else 100
+    progress_bar.progress((i + 1) / len(tickers))
 
+# -----------------------------
+# スコア計算と株数計算
+# -----------------------------
 df = calculate_scores(roe_data, per_data, roe_weight)
 df["Price"] = df["Ticker"].map(prices)
 df["Business"] = df["Ticker"].map(tickers_info)
@@ -78,7 +118,9 @@ df = df.dropna(subset=["Price"])
 
 df_sorted = df.sort_values(by="Score", ascending=False).copy()
 
-# 優先順位に基づく購入ロジック
+# -----------------------------
+# 優先順位に基づく購入ロジック（予算内・最大5銘柄）
+# -----------------------------
 selected = []
 remaining_usd = initial_usd
 
@@ -103,6 +145,9 @@ for _, row in df_sorted.iterrows():
 
 df_top = pd.DataFrame(selected)
 
+# -----------------------------
+# 表示
+# -----------------------------
 st.subheader("📊 スコアランキング（全銘柄）")
 st.dataframe(df_sorted[["Ticker", "Business", "ROE", "PER", "Score"]])
 
