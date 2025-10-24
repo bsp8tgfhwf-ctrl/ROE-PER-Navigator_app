@@ -83,37 +83,40 @@ prices = {
     "SMCI": 48.66
 }
 
-# ROE・PER取得
+# ROE・PER取得（None対策付き）
 roe_data = {}
 per_data = {}
 for ticker, (name, id_) in tickers_info.items():
     roe, per = get_roe_per_marketscreener(name, id_)
-    roe_data[ticker] = roe
-    per_data[ticker] = per
+    roe_data[ticker] = roe if roe is not None else 0
+    per_data[ticker] = per if per is not None else 100
 
 # スコア計算
 df = calculate_scores(roe_data, per_data, roe_weight)
 df["Price"] = df["Ticker"].map(prices)
 df["Allocated_USD"] = df["Weight"] * initial_usd
-df["Shares"] = (df["Allocated_USD"] / df["Price"]).astype(int)
-df["Used_USD"] = df["Shares"] * df["Price"]
-df["Used_JPY"] = df["Used_USD"] * usd_to_jpy
-df["Rank"] = df["Score"].rank(ascending=False).astype(int)
+
+# NaN除外して株数計算
+df_valid = df.dropna(subset=["Allocated_USD", "Price"]).copy()
+df_valid["Shares"] = (df_valid["Allocated_USD"] / df_valid["Price"]).astype(int)
+df_valid["Used_USD"] = df_valid["Shares"] * df_valid["Price"]
+df_valid["Used_JPY"] = df_valid["Used_USD"] * usd_to_jpy
+df_valid["Rank"] = df_valid["Score"].rank(ascending=False).astype(int)
 
 # -----------------------------
-# 表示①：スコアランキング（強調付き）
+# 表示①：スコアランキング（購入対象を強調）
 # -----------------------------
 def highlight_purchases(row):
     return ['background-color: #dff0d8' if row['Shares'] >= 1 else '' for _ in row]
 
-styled_df = df.sort_values(by="Score", ascending=False).reset_index(drop=True).style.apply(highlight_purchases, axis=1)
+styled_df = df_valid.sort_values(by="Score", ascending=False).reset_index(drop=True).style.apply(highlight_purchases, axis=1)
 st.subheader("📊 スコアランキング（購入対象を強調）")
 st.dataframe(styled_df)
 
 # -----------------------------
 # 表示②：購入株数と円換算
 # -----------------------------
-df_purchased = df[df["Shares"] >= 1]
+df_purchased = df_valid[df_valid["Shares"] >= 1]
 total_invested_yen = df_purchased["Used_JPY"].sum()
 
 st.subheader("💰 初期購入対象銘柄（株数と円換算）")
