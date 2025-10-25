@@ -103,6 +103,18 @@ if mode == "初期購入":
     df_top5["Used_USD"] = df_top5["Shares"] * df_top5["Price"]
     df_top5["Used_JPY"] = df_top5["Used_USD"] * usd_to_jpy
 
+    # スコア上位5銘柄を購入推奨としてフラグ付け
+    recommended_tickers = df_sorted.head(5)["Ticker"].tolist()
+    df_sorted["Recommended"] = df_sorted["Ticker"].apply(lambda x: "✅" if x in recommended_tickers else "")
+
+    # 📊 全銘柄スコア一覧（購入推奨フラグ付き）
+    st.subheader("📊 スコアランキング（全銘柄）")
+    st.dataframe(df_sorted[["Ticker", "Business", "ROE", "PER", "Score", "Recommended"]])
+
+    # 🎯 購入推奨銘柄（上位5）
+    st.subheader("🎯 購入推奨銘柄（上位5）")
+    st.dataframe(df_sorted[df_sorted["Recommended"] == "✅"][["Ticker", "Business", "ROE", "PER", "Score"]])
+
     st.subheader("📊 初期購入対象（上位5銘柄）")
     st.dataframe(df_top5[["Ticker", "Shares", "Price", "Used_USD", "Used_JPY"]])
     st.write(f"🧾 合計投資額（円）: {df_top5['Used_JPY'].sum():,.0f} 円")
@@ -116,6 +128,7 @@ if mode == "初期購入":
     portfolio_df = df_top5[["Ticker", "Shares", "PurchasePriceUSD", "PurchaseDate", "ROE", "PER", "Score", "PurchaseRate"]]
     csv = portfolio_df.to_csv(index=False).encode("utf-8")
     st.download_button("📄 portfolio.csv をダウンロード", data=csv, file_name="portfolio.csv", mime="text/csv")
+    
 
 # 月次リバランスモード
 elif mode == "月次リバランス":
@@ -169,5 +182,6 @@ elif mode == "月次リバランス":
             final_df = updated_df[["Ticker", "Shares", "PurchasePriceUSD", "PurchaseDate", "ROE", "PER", "Score", "PurchaseRate"]]
             csv = final_df.to_csv(index=False).encode("utf-8")
             st.download_button("📥 portfolio.csv をダウンロード", data=csv, file_name="portfolio.csv", mime="text/csv")
+
 
 
