@@ -146,4 +146,26 @@ elif mode == "月次リバランス":
                 rebalance_actions.append({"Ticker": row["Ticker"], "Action": "Buy", "Price": row["Price"]})
         for _, row in portfolio_df.iterrows():
             if row["Ticker"] not in top_candidates["Ticker"].values:
-                rebalance_actions.append({"
+                rebalance_actions.append({"                rebalance_actions.append({
+                    "Ticker": row["Ticker"],
+                    "Action": "Sell",
+                    "Price": row["CurrentPriceUSD"]
+                })
+
+        st.subheader("🔁 売買提案")
+        st.dataframe(pd.DataFrame(rebalance_actions))
+
+        st.subheader("📥 リバランス後のポートフォリオを保存")
+        if st.button("📄 portfolio.csv を更新"):
+            updated_df = top_candidates.copy()
+            updated_df["Shares"] = 1  # ここは今後、追加投資額に応じて分配可能
+            updated_df["PurchasePriceUSD"] = updated_df["Price"]
+            updated_df["PurchaseDate"] = pd.Timestamp.today().strftime("%Y-%m-%d")
+            updated_df["ROE"] = updated_df["Ticker"].map(roe_data)
+            updated_df["PER"] = updated_df["Ticker"].map(per_data)
+            updated_df["Score"] = updated_df["Ticker"].map(df.set_index("Ticker")["Score"])
+            updated_df["PurchaseRate"] = usd_to_jpy
+            final_df = updated_df[["Ticker", "Shares", "PurchasePriceUSD", "PurchaseDate", "ROE", "PER", "Score", "PurchaseRate"]]
+            csv = final_df.to_csv(index=False).encode("utf-8")
+            st.download_button("📥 portfolio.csv をダウンロード", data=csv, file_name="portfolio.csv", mime="text/csv")
+
