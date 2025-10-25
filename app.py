@@ -97,38 +97,39 @@ if mode == "初期購入":
     st.header("🛒 初期購入モード")
     initial_yen = st.number_input("💰 初期投資額（円）を入力してください", value=300000, step=10000)
     initial_usd = initial_yen / usd_to_jpy
-    df_top5 = df_sorted.head(5).copy()
-    allocated_usd = initial_usd / 5
-    df_top5["Shares"] = (allocated_usd / df_top5["Price"]).astype(int)
-    df_top5["Used_USD"] = df_top5["Shares"] * df_top5["Price"]
-    df_top5["Used_JPY"] = df_top5["Used_USD"] * usd_to_jpy
-
-    # スコア上位5銘柄を購入推奨としてフラグ付け
-    recommended_tickers = df_sorted.head(5)["Ticker"].tolist()
-    df_sorted["Recommended"] = df_sorted["Ticker"].apply(lambda x: "✅" if x in recommended_tickers else "")
-
-    # 📊 全銘柄スコア一覧（購入推奨フラグ付き）
+    
+    # スコア上位から順に購入可能か判定
+    df_sorted["Allocated_USD"] = initial_usd / 5  # 仮に均等配分
+    df_sorted["Shares"] = (df_sorted["Allocated_USD"] / df_sorted["Price"]).astype(int)
+    df_sorted["Recommended"] = df_sorted["Shares"].apply(lambda x: "✅" if x > 0 else "❌")
+    
+    # 📊 全銘柄スコア一覧（購入可否付き）
     st.subheader("📊 スコアランキング（全銘柄）")
-    st.dataframe(df_sorted[["Ticker", "Business", "ROE", "PER", "Score", "Recommended"]])
-
-    # 🎯 購入推奨銘柄（上位5）
-    st.subheader("🎯 購入推奨銘柄（上位5）")
-    st.dataframe(df_sorted[df_sorted["Recommended"] == "✅"][["Ticker", "Business", "ROE", "PER", "Score"]])
-
-    st.subheader("📊 初期購入対象（上位5銘柄）")
-    st.dataframe(df_top5[["Ticker", "Shares", "Price", "Used_USD", "Used_JPY"]])
-    st.write(f"🧾 合計投資額（円）: {df_top5['Used_JPY'].sum():,.0f} 円")
-
-    df_top5["PurchasePriceUSD"] = df_top5["Price"]
-    df_top5["PurchaseDate"] = pd.Timestamp.today().strftime("%Y-%m-%d")
-    df_top5["ROE"] = df_top5["Ticker"].map(roe_data)
-    df_top5["PER"] = df_top5["Ticker"].map(per_data)
-    df_top5["Score"] = df_top5["Ticker"].map(df.set_index("Ticker")["Score"])
-    df_top5["PurchaseRate"] = usd_to_jpy
-    portfolio_df = df_top5[["Ticker", "Shares", "PurchasePriceUSD", "PurchaseDate", "ROE", "PER", "Score", "PurchaseRate"]]
+    st.dataframe(df_sorted[["Ticker", "Business", "ROE", "PER", "Score", "Price", "Shares", "Recommended"]])
+    
+    # 🎯 購入推奨銘柄（予算内で1株以上買える）
+    st.subheader("🎯 購入推奨銘柄（予算内で購入可能）")
+    df_recommended = df_sorted[df_sorted["Recommended"] == "✅"].head(5).copy()
+    df_recommended["Used_USD"] = df_recommended["Shares"] * df_recommended["Price"]
+    df_recommended["Used_JPY"] = df_recommended["Used_USD"] * usd_to_jpy
+    st.dataframe(df_recommended[["Ticker", "Shares", "Price", "Used_USD", "Used_JPY", "Score"]])
+    st.write(f"🧾 合計投資額（円）: {df_recommended['Used_JPY'].sum():,.0f} 円")
+    
+    # ❌ 購入不可銘柄（予算オーバー）
+    st.subheader("❌ 購入不可（予算オーバー）")
+    df_unbuyable = df_sorted[df_sorted["Recommended"] == "❌"].head(5)
+    st.dataframe(df_unbuyable[["Ticker", "Price", "Score", "ROE", "PER"]])
+    
+    # 📥 CSV出力
+    df_recommended["PurchasePriceUSD"] = df_recommended["Price"]
+    df_recommended["PurchaseDate"] = pd.Timestamp.today().strftime("%Y-%m-%d")
+    df_recommended["ROE"] = df_recommended["Ticker"].map(roe_data)
+    df_recommended["PER"] = df_recommended["Ticker"].map(per_data)
+    df_recommended["Score"] = df_recommended["Ticker"].map(df.set_index("Ticker")["Score"])
+    df_recommended["PurchaseRate"] = usd_to_jpy
+    portfolio_df = df_recommended[["Ticker", "Shares", "PurchasePriceUSD", "PurchaseDate", "ROE", "PER", "Score", "PurchaseRate"]]
     csv = portfolio_df.to_csv(index=False).encode("utf-8")
     st.download_button("📄 portfolio.csv をダウンロード", data=csv, file_name="portfolio.csv", mime="text/csv")
-    
 
 # 月次リバランスモード
 elif mode == "月次リバランス":
@@ -139,53 +140,51 @@ elif mode == "月次リバランス":
         owned_tickers = portfolio_df["Ticker"].tolist()
         additional_yen = st.number_input("📥 今月の追加投資額（円）", value=0)
         additional_usd = additional_yen / usd_to_jpy
-
+        
+        # 損益計算
         portfolio_df["CurrentPriceUSD"] = portfolio_df["Ticker"].map(prices)
         portfolio_df["CurrentRate"] = usd_to_jpy
         portfolio_df["ProfitJPY"] = (
             (portfolio_df["CurrentPriceUSD"] * portfolio_df["CurrentRate"]) -
             (portfolio_df["PurchasePriceUSD"] * portfolio_df["PurchaseRate"])
         ) * portfolio_df["Shares"]
-
+        
         st.subheader("💰 円ベースの損益（含み益・損）")
         st.dataframe(portfolio_df[["Ticker", "Shares", "PurchasePriceUSD", "CurrentPriceUSD", "PurchaseRate", "CurrentRate", "ProfitJPY"]])
         st.write(f"📈 合計損益（円）: {portfolio_df['ProfitJPY'].sum():,.0f} 円")
-
-        top_candidates = df_sorted.head(5)
-        rebalance_actions = []
-
-        for _, row in top_candidates.iterrows():
-            if row["Ticker"] not in owned_tickers:
-                rebalance_actions.append({"Ticker": row["Ticker"], "Action": "Buy", "Price": row["Price"]})
-        for _, row in portfolio_df.iterrows():
-            if row["Ticker"] not in top_candidates["Ticker"].values:
-                rebalance_actions.append({
-                    "Ticker": row["Ticker"],
-                    "Action": "Sell",
-                    "Price": row["CurrentPriceUSD"]
-                })
-
         
-        st.subheader("🔁 売買提案")
-        st.dataframe(pd.DataFrame(rebalance_actions))
-
-        st.subheader("📥 リバランス後のポートフォリオを保存")
+        # スコア上位から購入可能か判定
+        top_candidates = df_sorted.head(10).copy()
+        top_candidates["Score"] = top_candidates["Ticker"].map(df.set_index("Ticker")["Score"])
+        top_candidates["Weight"] = top_candidates["Score"] / top_candidates["Score"].sum()
+        top_candidates["Allocated_USD"] = top_candidates["Weight"] * additional_usd
+        top_candidates["Shares"] = (top_candidates["Allocated_USD"] / top_candidates["Price"]).astype(int)
+        top_candidates["Recommended"] = top_candidates["Shares"].apply(lambda x: "✅" if x > 0 else "❌")
+        
+        # 🎯 購入推奨銘柄（予算内で購入可能）
+        st.subheader("🎯 購入推奨銘柄（予算内で購入可能）")
+        df_recommended = top_candidates[top_candidates["Recommended"] == "✅"].copy()
+        st.dataframe(df_recommended[["Ticker", "Price", "Score", "Shares", "Allocated_USD"]])
+        
+        # ❌ 購入不可銘柄（予算オーバー）
+        st.subheader("❌ 購入不可（予算オーバー）")
+        df_unbuyable = top_candidates[top_candidates["Recommended"] == "❌"].copy()
+        st.dataframe(df_unbuyable[["Ticker", "Price", "Score", "ROE", "PER"]])
+        
+        # 🔁 売却候補（保有中だが推奨外）
+        st.subheader("🔁 売却候補（保有中だが推奨外）")
+        sell_candidates = portfolio_df[~portfolio_df["Ticker"].isin(df_recommended["Ticker"])]
+        st.dataframe(sell_candidates[["Ticker", "Shares", "ProfitJPY"]])
+        
+        # 📥 CSV保存
         if st.button("📄 portfolio.csv を更新"):
-
-            updated_df = top_candidates.copy()
-            updated_df["PurchasePriceUSD"] = updated_df["Price"]
-            updated_df["PurchaseDate"] = pd.Timestamp.today().strftime("%Y-%m-%d")
-            updated_df["ROE"] = updated_df["Ticker"].map(roe_data)
-            updated_df["PER"] = updated_df["Ticker"].map(per_data)
-            updated_df["Score"] = updated_df["Ticker"].map(df.set_index("Ticker")["Score"])
-            updated_df["PurchaseRate"] = usd_to_jpy
-            
-            # ✅ 追加投資額をスコアに応じて分配
-            updated_df["Weight"] = updated_df["Score"] / updated_df["Score"].sum()
-            updated_df["Allocated_USD"] = updated_df["Weight"] * additional_usd
-            updated_df["Shares"] = (updated_df["Allocated_USD"] / updated_df["Price"]).astype(int)
-            
-            final_df = updated_df[["Ticker", "Shares", "PurchasePriceUSD", "PurchaseDate", "ROE", "PER", "Score", "PurchaseRate"]]
+            df_recommended["PurchasePriceUSD"] = df_recommended["Price"]
+            df_recommended["PurchaseDate"] = pd.Timestamp.today().strftime("%Y-%m-%d")
+            df_recommended["ROE"] = df_recommended["Ticker"].map(roe_data)
+            df_recommended["PER"] = df_recommended["Ticker"].map(per_data)
+            df_recommended["PurchaseRate"] = usd_to_jpy
+            final_df = df_recommended[["Ticker", "Shares", "PurchasePriceUSD", "PurchaseDate", "ROE", "PER", "Score", "PurchaseRate"]]
             csv = final_df.to_csv(index=False).encode("utf-8")
-            st.download_button("📥 portfolio.csv をダウンロード", data=csv, file_name="portfolio.csv", mime="text/csv")            
+            st.download_button("📥 portfolio.csv をダウンロード", data=csv, file_name="portfolio.csv", mime="text/csv")
         
+
