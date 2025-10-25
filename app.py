@@ -146,7 +146,7 @@ elif mode == "月次リバランス":
                 rebalance_actions.append({"Ticker": row["Ticker"], "Action": "Buy", "Price": row["Price"]})
         for _, row in portfolio_df.iterrows():
             if row["Ticker"] not in top_candidates["Ticker"].values:
-                rebalance_actions.append({"                rebalance_actions.append({
+                rebalance_actions.append({"rebalance_actions.append({
                     "Ticker": row["Ticker"],
                     "Action": "Sell",
                     "Price": row["CurrentPriceUSD"]
@@ -168,4 +168,3 @@ elif mode == "月次リバランス":
             final_df = updated_df[["Ticker", "Shares", "PurchasePriceUSD", "PurchaseDate", "ROE", "PER", "Score", "PurchaseRate"]]
             csv = final_df.to_csv(index=False).encode("utf-8")
             st.download_button("📥 portfolio.csv をダウンロード", data=csv, file_name="portfolio.csv", mime="text/csv")
-
